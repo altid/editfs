@@ -56,7 +56,7 @@ func (s *Session) Run(ctrl controller.Controller, cmd *commander.Command) error 
 		//return x(s, ctrl, cmd)
 		return nil
 	case "open":
-		return open(s, ctrl, cmd)
+		return open(s, cmd)
 	case "save":
 		//return save(s, ctrl, cmd)
 		return nil
@@ -83,6 +83,7 @@ func (s *Session) Start(c controller.Controller) error {
 }
 
 func (s *Session) Listen(c controller.Controller) {
+	s.Start(c)
 	<-s.ctx.Done()
 }
 
