@@ -1,61 +1,110 @@
-package main
+package editfs
 
 import (
-	"flag"
-	"log"
-	"os"
+	"context"
+	"fmt"
 
+	"github.com/altid/editfs/internal/commands"
+	"github.com/altid/editfs/internal/session"
 	"github.com/altid/libs/config"
-	"github.com/altid/libs/config/types"
-	"github.com/altid/libs/fs"
+	"github.com/altid/libs/mdns"
+	"github.com/altid/libs/service"
+	"github.com/altid/libs/service/listener"
+	"github.com/altid/libs/store"
 )
 
-var (
-	mtpt    = flag.String("p", "/tmp/altid", "Path for filesystem")
-	srv     = flag.String("s", "edit", "Name of service")
-	cfgfile = flag.String("c", "", "Directory of configuration file")
-	debug   = flag.Bool("d", false, "enable debug logging")
-	setup   = flag.Bool("conf", false, "Run configuration setup")
-)
+type Editfs struct {
+	run     func() error
+	session *session.Session
+	addr	string
+	port	int
+	name    string
+	debug   bool
+	mdns    *mdns.Entry
+}
 
-func main() {
-	flag.Parse()
-	if flag.Lookup("h") != nil {
-		flag.Usage()
-		os.Exit(1)
+var defaults *session.Defaults = &session.Defaults{
+	Address: "",
+	Port:    564,
+	SSL:     "simple",
+	TLSCert: "",
+	TLSKey:  "",
+}
+
+func CreateConfig(srv string, debug bool) error {
+	return config.Create(defaults, srv, "", debug)
+}
+
+func Register(addr string, port int, srv string, debug bool) (*Editfs, error) {
+	var err error
+	if e := config.Marshal(defaults, srv, "", debug); e != nil {
+		return nil, e
 	}
-
-	conf := &struct {
-		Listen types.ListenAddress `altid:"listen_address,no_prompt"`
-		Logdir types.Logdir        `altid:"logdir,no_prompt"`
-	}{"none", "none"}
-
-	if *setup {
-		if e := config.Create(conf, *srv, *cfgfile, *debug); e != nil {
-			log.Fatal(e)
-		}
-
-		os.Exit(0)
-	}
-
-	if e := config.Marshal(conf, *srv, *cfgfile, *debug); e != nil {
-		log.Fatal(e)
-	}
-
-	s := &server{}
-
-	ctrl, err := fs.New(s, string(conf.Logdir), *mtpt, *srv, "feed", *debug)
+	l, err := tolisten(defaults, addr, port, debug)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
+	}
+	session := &session.Session{
+		Defaults: defaults,
+		Verbose: debug,
+	}
+	ctx := context.Background()
+	session.Parse(ctx)
+	m := &Editfs{
+		session: session,
+		name:    srv,
+		addr:	 addr,
+		port:    port,
+		debug:   debug,
+	}
+	c := service.New(srv, addr, debug)
+	c.WithListener(l)
+	c.WithStore(store.NewRamstore(debug))
+	c.WithContext(ctx)
+	c.WithCallbacks(session)
+	c.WithRunner(session)
+	c.SetCommands(commands.Commands)
+	m.run = c.Listen
+	return m, nil
+}
+
+func (edit *Editfs) Run() error {
+	return edit.run()
+}
+
+func (edit *Editfs) Broadcast() error {
+	url := fmt.Sprintf("%s:%d", edit.addr, edit.port)
+	entry, err := mdns.ParseURL(url, edit.name)
+	if err != nil {
+		return err
+	}
+	if e := mdns.Register(entry); e != nil {
+		return e
 	}
 
-	defer ctrl.Cleanup()
-	ctrl.SetCommands(Commands...)
-	ctrl.CreateBuffer("main", "feed")
+	edit.mdns = entry
+	return nil
+}
 
-	//go s.listen()
-
-	if e := ctrl.Listen(); e != nil {
-		log.Fatal(e)
+func (edit *Editfs) Cleanup() {
+	if edit.mdns != nil {
+		edit.mdns.Cleanup()
 	}
+	edit.session.Quit()
+}
+func (edit *Editfs) Session() *session.Session {
+	return edit.session
+}
+
+func tolisten(d *session.Defaults, addr string, port int, debug bool) (listener.Listener, error) {
+	//if ssh {
+	// 	return listener.NewListenSsh()
+	//}
+
+	dial := fmt.Sprintf("%s:%d", addr, port)
+	if d.TLSKey == "none" && d.TLSCert == "none" {
+		return listener.NewListen9p(dial, "", "", debug)
+	}
+
+	return listener.NewListen9p(dial, d.TLSCert, d.TLSKey, debug)
 }

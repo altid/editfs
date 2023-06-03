@@ -1,4 +1,4 @@
-package main
+package session
 
 import (
 	"fmt"
@@ -6,10 +6,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/altid/libs/fs"
+	"github.com/altid/libs/service/commander"
+	"github.com/altid/libs/service/controller"
 )
 
-func open(s *server, ctrl *fs.Control, cmd *fs.Command) error {
+func open(s *Session, ctrl controller.Controller, cmd *commander.Command) error {
 
 	// Create a ring buffer for edits in the server, and all modifications (Sam commands, etc) will be done via ctl messages
 	// Clients modifying the underlying files should be wrapped in ctl messages outright, rather than allowing it
@@ -30,7 +31,7 @@ func open(s *server, ctrl *fs.Control, cmd *fs.Command) error {
 				return nil
 			}
 
-			if e := ctrl.CreateBuffer(p, "document"); e != nil {
+			if e := ctrl.CreateBuffer(p); e != nil {
 				return e
 			}
 
@@ -39,7 +40,7 @@ func open(s *server, ctrl *fs.Control, cmd *fs.Command) error {
 				return err
 			}
 
-			mw, err := ctrl.MainWriter(p, "document")
+			mw, err := ctrl.MainWriter(p)
 			if err != nil {
 				return err
 			}
@@ -49,7 +50,7 @@ func open(s *server, ctrl *fs.Control, cmd *fs.Command) error {
 		})
 	case false:
 		p := cmd.Args[0]
-		if e := ctrl.CreateBuffer(p, "document"); e != nil {
+		if e := ctrl.CreateBuffer(p); e != nil {
 			return e
 		}
 
@@ -58,7 +59,7 @@ func open(s *server, ctrl *fs.Control, cmd *fs.Command) error {
 			return err
 		}
 
-		mw, err := ctrl.MainWriter(p, "document")
+		mw, err := ctrl.MainWriter(p)
 		if err != nil {
 			return err
 		}
